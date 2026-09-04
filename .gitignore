@@ -1,0 +1,27 @@
+# Dependencies and build output — rebuilt, never committed.
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime state. It belongs to the machine, not the code: under the portal it
+# lives in portal-data/<service>/ instead (see config.STATE_ROOT).
+data/
+log/
+runs/
+*.log
+*.port
+*.pid
+
+# This machine's own settings, and anything elog handed us. The .example files
+# next to them ARE committed — they are the documentation.
+*.conf
+*credentials*.json
+
+# Compiled runner (built by runner/build.sh).
+runner/build/
+
+.DS_Store
+.idea/
+.vscode/

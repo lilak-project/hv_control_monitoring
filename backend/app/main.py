@@ -1,0 +1,100 @@
+"""CAEN HV monitoring service.
+
+Serves a JSON API and, once the frontend is built, the single-page UI from the
+same origin and port. There is no polling loop: a crate is read when someone
+asks for a snapshot, and every snapshot taken is kept.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
+
+from .caen import library_release
+from .config import SNAPSHOT_ROOT, STATIC_DIR
+from . import elog
+from .routers import crates, snapshots
+from .store import load_crates
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("hv")
+
+app = FastAPI(
+    title="HV Monitoring",
+    description=(
+        "On-demand readout of the CAEN HV crates. A snapshot logs in, reads "
+        "every parameter of every channel on every populated board, logs out, "
+        "and is archived under the day it was taken."
+    ),
+    version="1.0.0",
+)
+
+# The Vite dev server runs on another port; in production the UI is same-origin
+# and these headers are simply unused.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=(
+        r"http://(localhost|127\.0\.0\.1"
+        r"|10\.\d+\.\d+\.\d+"
+        r"|192\.168\.\d+\.\d+"
+        r"|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?"
+    ),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(crates.router)
+app.include_router(snapshots.router)
+# The LILAK elog asks this service to fill a task log; see app/elog.py.
+app.include_router(elog.router)
+
+
+@app.get("/api/health", tags=["meta"])
+def health() -> dict:
+    """Whether the service can do its job, without touching a crate to find out."""
+    release = library_release()
+    return {
+        "ok": bool(release),
+        "caen_library": release or "not loaded",
+        "crates": [crate.id for crate in load_crates()],
+        "archive": str(SNAPSHOT_ROOT),
+    }
+
+
+class UiFiles(StaticFiles):
+    """Serve the built UI, revalidating the entry point on every load.
+
+    Vite fingerprints the asset filenames, so those can be cached hard. The
+    HTML that points at them must not be, or a browser keeps running the
+    previous build after a redeploy and calls endpoints that no longer exist.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if path.endswith(".html") or path in ("", "."):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif response.status_code == 200 and "/assets/" in scope.get("path", ""):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+if STATIC_DIR.is_dir():
+    # Mounted last so it never shadows /api.
+    app.mount("/", UiFiles(directory=STATIC_DIR, html=True), name="ui")
+else:
+    log.warning("Frontend build not found at %s - run `npm run build` in frontend/", STATIC_DIR)
+
+    @app.get("/", tags=["meta"])
+    def missing_ui() -> dict:
+        return {
+            "ok": False,
+            "error": "Frontend is not built.",
+            "hint": "cd frontend && npm install && npm run build",
+            "api_docs": "/docs",
+        }

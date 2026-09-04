@@ -1,0 +1,376 @@
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  color-scheme: light;
+
+  /* Colour means one thing each; nothing on this page is tinted for looks. */
+  --hv-on: #1f7a35;
+  --hv-fault-fg: #b02a1e;
+  --hv-fault-bg: #fdf0ee;
+  --hv-changed-bg: #fff6dd;
+  --hv-rule: #e6e8ea;
+  --hv-rule-strong: #c9cdd1;
+  --hv-zebra: #fafbfc;
+  --hv-dim: #7a8085;
+  --hv-head-bg: #f2f4f6;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #fff;
+  font-size: 12px;
+}
+
+/* --- page frame -------------------------------------------------------- */
+
+/* Two fixed header rows, then one scrolling area, so the column headings and
+   the Snapshot button never scroll away from a fifty-row table. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--hv-rule);
+  min-height: 30px;
+}
+
+.bar-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Pushes everything after it to the right end of the bar. */
+.spacer {
+  margin-left: auto;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 0 40px;
+}
+
+/* --- numbers ----------------------------------------------------------- */
+
+/* Readings must not reflow as digits change, and columns must line up down
+   the whole table. */
+.tabular {
+  font-family: var(--mantine-font-family-monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.dim {
+  color: var(--hv-dim);
+}
+
+.meta {
+  color: var(--hv-dim);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* --- history ----------------------------------------------------------- */
+
+.history {
+  width: 208px;
+  flex: none;
+  border-right: 1px solid var(--hv-rule);
+  overflow: auto;
+  padding-bottom: 40px;
+}
+
+.history-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--hv-head-bg);
+  border-bottom: 1px solid var(--hv-rule);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #3d4348;
+}
+
+/* A row is two controls, not one: the body opens the snapshot, the button at
+   the end makes it the thing everything else is compared against. */
+.history-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--hv-rule);
+}
+
+.history-row:hover {
+  background: var(--hv-zebra);
+}
+
+.history-open,
+.history-compare {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  padding: 2px 6px;
+}
+
+.history-open {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.history-compare {
+  flex: none;
+  padding: 0 5px;
+  color: var(--hv-dim);
+  opacity: 0;
+}
+
+.history-row:hover .history-compare,
+.history-row.is-baseline .history-compare,
+.history-compare:focus-visible {
+  opacity: 1;
+}
+
+.history-row.is-baseline .history-compare {
+  color: #a5750f;
+  font-weight: 700;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--hv-rule);
+}
+
+/* The snapshot on screen, and the one it is being compared against. A left
+   bar rather than a fill, so the row's own colours still read. */
+.history-row.is-current {
+  background: #eaf2fd;
+  box-shadow: inset 3px 0 0 var(--mantine-color-blue-7);
+}
+
+.history-row.is-baseline {
+  box-shadow: inset 3px 0 0 #d69e2e;
+}
+
+.history-row.is-current.is-baseline {
+  box-shadow:
+    inset 3px 0 0 var(--mantine-color-blue-7),
+    inset 6px 0 0 #d69e2e;
+}
+
+.history-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- boards ------------------------------------------------------------ */
+
+.board {
+  border-bottom: 1px solid var(--hv-rule-strong);
+}
+
+.board-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 8px 4px;
+  background: #fff;
+}
+
+.board-slot {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* --- the table --------------------------------------------------------- */
+
+.grid {
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.25;
+  width: max-content;
+  min-width: 100%;
+}
+
+.grid th,
+.grid td {
+  padding: 1px 7px;
+  border-bottom: 1px solid var(--hv-rule);
+  white-space: nowrap;
+}
+
+.grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--hv-head-bg);
+  border-bottom: 1px solid var(--hv-rule-strong);
+  font-weight: 600;
+  font-size: 11px;
+  text-align: right;
+  cursor: default;
+}
+
+/* Channel number and name anchor the row; they stay put when the parameter
+   columns scroll sideways. */
+.grid th.stick,
+.grid td.stick {
+  position: sticky;
+  z-index: 1;
+  background: #fff;
+  text-align: left;
+}
+
+.grid thead th.stick {
+  z-index: 3;
+  background: var(--hv-head-bg);
+}
+
+/* A fixed width, because the name column's sticky offset below has to match
+   it exactly or the two overlap as the table scrolls sideways. */
+.grid th.col-ch,
+.grid td.col-ch {
+  left: 0;
+  width: 34px;
+  min-width: 34px;
+  text-align: right;
+  color: var(--hv-dim);
+  padding-right: 6px;
+}
+
+.grid th.col-name,
+.grid td.col-name {
+  left: 34px;
+  border-right: 1px solid var(--hv-rule-strong);
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid tbody td {
+  text-align: right;
+}
+
+/* The sticky columns carry their own background -- without one you would see
+   the scrolling cells through them -- so every row tint has to name them too,
+   or channel and name stay white while the rest of the row stripes. */
+.grid tbody tr:nth-child(even) td,
+.grid tbody tr:nth-child(even) td.stick {
+  background: var(--hv-zebra);
+}
+
+.grid tbody tr:hover td,
+.grid tbody tr:hover td.stick {
+  background: #eef4fb;
+}
+
+/* --- cell states ------------------------------------------------------- */
+
+.on {
+  color: var(--hv-on);
+  font-weight: 600;
+}
+
+.off {
+  color: var(--hv-dim);
+}
+
+/* A value that moved since the snapshot being compared against. The old
+   reading is on the cell's tooltip. */
+.changed {
+  background: var(--hv-changed-bg) !important;
+  box-shadow: inset 0 -2px 0 #e5c56a;
+}
+
+/* A status word with a fault bit set: the one thing on the page that should
+   catch the eye from across the room. */
+.fault {
+  color: var(--hv-fault-fg);
+  font-weight: 600;
+}
+
+tr.row-fault td,
+tr.row-fault td.stick {
+  background: var(--hv-fault-bg) !important;
+}
+
+.status-flags {
+  font-size: 11px;
+}
+
+/* --- messages ---------------------------------------------------------- */
+
+.notice {
+  margin: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--hv-rule-strong);
+  border-left: 3px solid var(--hv-fault-fg);
+  background: var(--hv-fault-bg);
+  color: #5a2019;
+  font-size: 12px;
+}
+
+.empty {
+  padding: 24px 12px;
+  color: var(--hv-dim);
+  text-align: center;
+}
+
+/* --- column picker ----------------------------------------------------- */
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 1px 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* At narrow widths the history list would take a third of the page; it folds
+   away and is reached from the toolbar instead. */
+@media (max-width: 47.99em) {
+  .history {
+    display: none;
+  }
+
+  .history.is-open {
+    display: block;
+    width: 100%;
+  }
+
+  .history.is-open ~ .main {
+    display: none;
+  }
+}
