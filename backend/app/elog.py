@@ -405,7 +405,10 @@ def _archive(reading: dict, crate_id: str, mode: str) -> str:
         return last[1]
 
     try:
-        saved = snaplog.save(reading, note=f"elog {mode}")
+        # No note: the archive list shows the time, and "elog task" told an
+        # operator nothing they could act on. A note is for what a PERSON wants
+        # to say about a reading.
+        saved = snaplog.save(reading)
         written = str(snaplog.path_of(crate_id, saved["id"]))
     except Exception as err:
         # Failing to archive must not fail the reply: the numbers are still
