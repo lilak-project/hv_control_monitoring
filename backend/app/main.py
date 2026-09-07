@@ -57,35 +57,71 @@ app.include_router(elog.router)
 
 @app.get("/api/live", tags=["meta"], summary="Compact numbers for the portal's live mode")
 def live() -> dict:
-    """From the most recent SAVED snapshot of each crate -- never the hardware:
-    a crate read costs seconds and this is polled every few. `snaplog.latest`
-    is the one-line summary (powered/faults counts); the trip count needs the
-    channel rows, so the full file is loaded too."""
-    from . import snaplog
-    crates = load_crates()
+    """What the crate is doing NOW, without archiving anything.
+
+    The reading comes from the same short-lived cache the elog fills use
+    (app/elog.live_reading), so the wall polling every few seconds costs at
+    most one crate read per HV_LIVE_MAX_AGE seconds and writes no snapshot.
+    Each crate contributes its counts; a crate with channels picked in the UI
+    ("LIVE" on a channel row) also contributes one tile per channel.
+    """
+    from . import elog as elog_mod
+
     items = []
+    crates = load_crates()
     for crate in crates:
-        summary = snaplog.latest(crate.id)
-        if not summary:
-            items.append({"label": crate.id, "value": "—", "unit": "", "state": "off", "sub": "no snapshot yet"})
+        prefix = f"{crate.label or crate.id} · " if len(crates) > 1 else ""
+        reading, age, source = elog_mod.live_reading(crate)
+        if reading is None:
+            items.append({"label": crate.label or crate.id, "value": "—", "unit": "", "state": "down",
+                          "sub": "unreachable"})
             continue
-        powered = int(summary.get("powered") or 0)
-        faults = int(summary.get("faults") or 0)
-        tripped = 0
-        try:
-            full = snaplog.load(crate.id, summary["id"])
-            for board in full.get("boards") or []:
-                for row in board.get("rows") or []:
-                    flags = [str(f).upper() for f in ((row.get("status") or {}).get("flags") or [])]
-                    if any("TRIP" in f for f in flags):
-                        tripped += 1
-        except Exception:                          # a missing/old file: counts from the summary still stand
-            pass
-        prefix = f"{crate.id} · " if len(crates) > 1 else ""
-        items.append({"label": prefix + "on", "value": str(powered), "unit": "ch", "state": "ok" if powered else ""})
-        items.append({"label": prefix + "trip", "value": str(tripped), "unit": "", "state": "trip" if tripped else ""})
-        items.append({"label": prefix + "alarm", "value": str(faults), "unit": "", "state": "alarm" if faults else "",
-                      "sub": (summary.get("taken_at_local") or summary.get("taken_at") or "")[:16]})
+        rows = {(board["slot"], row["channel"]): (board, row)
+                for board in reading.get("boards") or []
+                for row in board.get("rows") or []}
+        powered = trips = faults = 0
+        for _, row in rows.values():
+            status = row.get("status") or {}
+            flags = [str(f).upper() for f in (status.get("flags") or [])]
+            if (row.get("values") or {}).get("Pw") == 1:
+                powered += 1
+            if status.get("fault"):
+                faults += 1
+            if any("TRIP" in f for f in flags):
+                trips += 1
+        stale = age is not None and age > 60
+        sub = "" if not stale else f"{int(age)} s old"
+        items.append({"label": prefix + "on", "value": str(powered), "unit": "ch",
+                      "state": "warn" if stale else ("ok" if powered else ""), "sub": sub})
+        items.append({"label": prefix + "trip", "value": str(trips), "unit": "", "state": "trip" if trips else ""})
+        items.append({"label": prefix + "alarm", "value": str(faults), "unit": "", "state": "alarm" if faults else ""})
+
+        for pick in crate.live_channels:
+            found = rows.get((pick["slot"], pick["channel"]))
+            label = pick.get("name") or (found and found[1].get("name")) or f"{pick['slot']}.{pick['channel']}"
+            if not found:
+                items.append({"label": prefix + label, "value": "—", "unit": "", "state": "off",
+                              "sub": f"slot {pick['slot']} ch {pick['channel']} not read"})
+                continue
+            _, row = found
+            values = row.get("values") or {}
+            status = row.get("status") or {}
+            flags = [str(f).upper() for f in (status.get("flags") or [])]
+            on = values.get("Pw") == 1
+            vmon = values.get("VMon")
+            imon = values.get("IMon")
+            state = "alarm" if status.get("fault") else ("trip" if any("TRIP" in f for f in flags)
+                                                         else ("ok" if on else "off"))
+            bits = []
+            if imon is not None:
+                try:
+                    bits.append(f"{float(imon):g} µA")
+                except (TypeError, ValueError):
+                    pass
+            bits.append("on" if on else "off")
+            items.append({"label": prefix + label, "value": "—" if vmon is None else f"{float(vmon):g}",
+                          "unit": "V" if vmon is not None else "", "state": state,
+                          "sub": " · ".join(bits), "title": f"slot {pick['slot']} ch {pick['channel']}"})
     return {"ok": True, "items": items}
 
 

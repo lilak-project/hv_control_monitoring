@@ -57,6 +57,9 @@ export default function App() {
     faultsOnly: false,
   })
 
+  /** Channels on the portal's live wall, for the crate on screen. */
+  const [livePicks, setLivePicks] = useState<{ slot: number; channel: number; name: string }[]>([])
+
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +96,38 @@ export default function App() {
     [],
   )
 
+  /** The live picks on one board, as a set of channel numbers. */
+  const liveOnBoard = useCallback(
+    (slot: number) => new Set(livePicks.filter((pick) => pick.slot === slot).map((pick) => pick.channel)),
+    [livePicks],
+  )
+
+  /** Put a channel on the portal's live wall, or take it off, and save.
+   *  Config only: this never reads the crate. */
+  const toggleLive = useCallback(
+    (slot: number, channel: number) => {
+      if (!crateId) return
+      const on = livePicks.some((pick) => pick.slot === slot && pick.channel === channel)
+      const next = on
+        ? livePicks.filter((pick) => !(pick.slot === slot && pick.channel === channel))
+        : [...livePicks, { slot, channel, name: "" }].sort((a, b) => a.slot - b.slot || a.channel - b.channel)
+      setLivePicks(next)                                  // optimistic
+      api
+        .setLiveChannels(crateId, next)
+        .then((saved) => {
+          setLivePicks(saved.channels)
+          setCrates((all) =>
+            all.map((crate) => (crate.id === crateId ? { ...crate, live_channels: saved.channels } : crate)),
+          )
+        })
+        .catch((err) => {
+          setLivePicks(livePicks)                         // put it back
+          fail(err, "Could not save the live channels")
+        })
+    },
+    [crateId, livePicks],
+  )
+
   // Switching crate resets everything that belongs to the old one, then opens
   // its most recent snapshot so the page is never blank when there is history.
   useEffect(() => {
@@ -103,6 +138,7 @@ export default function App() {
     setPinnedBaseline(null)
     setDay(null)
     setError(null)
+    setLivePicks(crates.find((crate) => crate.id === crateId)?.live_channels ?? [])
 
     refreshHistory(crateId, null)
       .then(async (entries) => {
@@ -415,6 +451,8 @@ export default function App() {
                   chosen={activeColumns}
                   changes={changes}
                   filter={filter}
+                  live={liveOnBoard(board.slot)}
+                  onLive={toggleLive}
                 />
               ))}
             </>

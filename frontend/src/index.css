@@ -374,3 +374,27 @@ tr.row-fault td.stick {
     display: none;
   }
 }
+
+/* The LIVE pick on a channel row: which channels the LILAK portal's live wall
+   shows for this crate. Off is an outline so a row of them reads as "none
+   chosen" rather than as a row of buttons. */
+.live-pick {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--mantine-color-dimmed);
+  background: transparent;
+  border: 1px solid var(--mantine-color-gray-4);
+}
+.live-pick:hover {
+  border-color: var(--mantine-color-orange-5);
+  color: var(--mantine-color-orange-7);
+}
+.live-pick.is-on {
+  background: var(--mantine-color-orange-6);
+  border-color: var(--mantine-color-orange-6);
+  color: #fff;
+}

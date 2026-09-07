@@ -12,11 +12,16 @@ export function BoardTable({
   chosen,
   changes,
   filter,
+  live,
+  onLive,
 }: {
   board: BoardReading
   chosen: Set<string>
   changes: Changes
   filter: RowFilter
+  /** Channels of THIS board on the portal's live wall. */
+  live?: Set<number>
+  onLive?: (slot: number, channel: number) => void
 }) {
   const params = visibleParams(board, chosen)
   const rows = board.rows.filter((row) => matchesFilter(row, board, filter, changes, params))
@@ -54,6 +59,11 @@ export function BoardTable({
             <tr>
               <th className="stick col-ch">ch</th>
               <th className="stick col-name">name</th>
+              {onLive ? (
+                <th title="Show this channel on the LILAK portal's live wall. Saving this never reads the crate.">
+                  live
+                </th>
+              ) : null}
               {params.map((spec) => (
                 <th key={spec.name} title={describeParam(spec)}>
                   {columnLabel(spec)}
@@ -68,6 +78,23 @@ export function BoardTable({
                 <td className="stick col-name" title={row.name || undefined}>
                   {row.name || <span className="dim">–</span>}
                 </td>
+                {onLive ? (
+                  <td>
+                    <button
+                      type="button"
+                      className={`live-pick${live?.has(row.channel) ? " is-on" : ""}`}
+                      onClick={() => onLive(board.slot, row.channel)}
+                      aria-pressed={live?.has(row.channel) ?? false}
+                      title={
+                        live?.has(row.channel)
+                          ? "On the portal's live wall — click to take it off"
+                          : "Put this channel on the portal's live wall"
+                      }
+                    >
+                      LIVE
+                    </button>
+                  </td>
+                ) : null}
                 {params.map((spec) => (
                   <Cell
                     key={spec.name}

@@ -10,6 +10,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class LiveChannel(BaseModel):
+    """One channel on the LILAK portal's live wall."""
+
+    slot: int
+    channel: int
+    name: str = ""
+
+
 class Crate(BaseModel):
     id: str = Field(description="Short name used in URLs, e.g. 'stark'.")
     label: str
@@ -17,6 +25,9 @@ class Crate(BaseModel):
     system_type: str
     username: str
     note: str = ""
+    live_channels: list[LiveChannel] = Field(
+        default_factory=list, description="Channels shown on the portal's live wall."
+    )
 
 
 class SnapshotSummary(BaseModel):

@@ -171,6 +171,19 @@ ALARM_I_PCT = float(os.environ.get("HV_ALARM_I_PCT", "50"))
 #: else within an hour.
 SNAPSHOT_MIN_INTERVAL = float(os.environ.get("HV_ELOG_SNAPSHOT_MIN_INTERVAL", "60"))
 
+#: How stale a cached reading may be before the live wall asks the crate again.
+#: The wall polls every few seconds; a crate read takes seconds and blocks the
+#: crate, so it is answered from the cache in between. Raise it to touch the
+#: crate less; the tile always says how old its numbers are.
+LIVE_MAX_AGE_SEC = float(os.environ.get("HV_LIVE_MAX_AGE", str(MAX_AGE_SEC)))
+
+#: After a failed login the live wall stops trying for this long. A crate that
+#: is off or on an unrouted subnet fails slowly -- a login timeout every poll
+#: would make the whole wall wait on it -- and the tile says how old its
+#: numbers are either way.
+LIVE_RETRY_SEC = float(os.environ.get("HV_LIVE_RETRY", "300"))
+_live_failed: dict[str, float] = {}
+
 #: Alarm lines listed in the body before it starts saying "and N more".
 BODY_ROWS = int(os.environ.get("HV_ELOG_BODY_ROWS", "15"))
 
@@ -216,7 +229,7 @@ def _remember(crate_id: str, reading: dict) -> None:
         _cache[crate_id] = (time.monotonic(), reading)
 
 
-def _reading(crate) -> tuple[dict | None, float | None, str]:
+def _reading(crate, max_age: float = MAX_AGE_SEC, skip_sweep: bool = False) -> tuple[dict | None, float | None, str]:
     """The crate's state: the reading, how old it is in seconds, and where it came from.
 
     Three sources, in order of preference -- a fresh sweep, the last one this
@@ -225,16 +238,19 @@ def _reading(crate) -> tuple[dict | None, float | None, str]:
     labelled as an hour old is far better for a logbook than a blank.
     """
     held = _cached(crate.id)
-    if held is not None and time.monotonic() - held[0] < MAX_AGE_SEC:
+    if held is not None and time.monotonic() - held[0] < max_age:
         return held[1], time.monotonic() - held[0], "live"
 
-    try:
-        fresh = snapshot.take(crate, busy_timeout=BUSY_WAIT_SEC)
-    except CaenError as err:
-        log.info("%s: %s; answering from the last reading", crate.id, err)
-    else:
-        _remember(crate.id, fresh)
-        return fresh, 0.0, "live"
+    if not skip_sweep:
+        try:
+            fresh = snapshot.take(crate, busy_timeout=BUSY_WAIT_SEC)
+        except CaenError as err:
+            log.info("%s: %s; answering from the last reading", crate.id, err)
+            _live_failed[crate.id] = time.monotonic()
+        else:
+            _live_failed.pop(crate.id, None)
+            _remember(crate.id, fresh)
+            return fresh, 0.0, "live"
 
     if held is not None:
         return held[1], time.monotonic() - held[0], "cached"
@@ -352,6 +368,20 @@ def _metrics(reading: dict) -> tuple[dict[str, int], list[str]]:
                              f"({i_off:.1f} % below)")
 
     return counts, lines
+
+
+def live_reading(crate) -> tuple[dict | None, float | None, str]:
+    """The crate's state for the portal's LIVE wall: the reading, its age, and
+    where it came from.
+
+    The same cache the elog fills use -- so a live poll and an elog task never
+    read the crate twice within MAX_AGE_SEC -- and it NEVER archives. The wall
+    is a window on the crate, not a reason to keep a file: snapshots are for
+    elog fills and for the operator pressing Snapshot.
+    """
+    failed_at = _live_failed.get(crate.id)
+    backing_off = failed_at is not None and time.monotonic() - failed_at < LIVE_RETRY_SEC
+    return _reading(crate, max_age=LIVE_MAX_AGE_SEC, skip_sweep=backing_off)
 
 
 def _archive(reading: dict, crate_id: str, mode: str) -> str:

@@ -22,6 +22,10 @@ class CrateConfig:
     username: str
     password: str
     note: str = ""
+    #: Channels the LILAK portal's live wall shows for this crate, in the order
+    #: they were ticked: [{"slot": 1, "channel": 0, "name": "Si det"}]. Empty
+    #: means the summary counts only.
+    live_channels: tuple[dict, ...] = ()
 
     def public(self) -> dict[str, Any]:
         """What the browser is allowed to see -- never the password."""
@@ -32,6 +36,7 @@ class CrateConfig:
             "system_type": self.system_type,
             "username": self.username,
             "note": self.note,
+            "live_channels": [dict(pick) for pick in self.live_channels],
         }
 
 
@@ -47,7 +52,28 @@ def _parse(entry: dict[str, Any]) -> CrateConfig:
         username=str(entry.get("username", "admin")),
         password=str(entry.get("password", "admin")),
         note=str(entry.get("note", "")),
+        live_channels=clean_live(entry.get("live_channels")),
     )
+
+
+def clean_live(values) -> tuple[dict, ...]:
+    """The live picks, as whole slot/channel numbers without repeats. A bad
+    entry is dropped rather than refused: a hand-edited file must not stop the
+    crate list loading."""
+    out: list[dict] = []
+    seen: set[tuple[int, int]] = set()
+    for value in values or []:
+        try:
+            slot = int(value["slot"])
+            channel = int(value["channel"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if slot < 0 or channel < 0 or (slot, channel) in seen:
+            continue
+        seen.add((slot, channel))
+        name = str(value.get("name") or "").strip()[:60]
+        out.append({"slot": slot, "channel": channel, "name": name})
+    return tuple(out)
 
 
 def load_crates(force: bool = False) -> list[CrateConfig]:
@@ -67,3 +93,32 @@ def load_crates(force: bool = False) -> list[CrateConfig]:
 
 def find_crate(crate_id: str) -> CrateConfig | None:
     return next((crate for crate in load_crates() if crate.id == crate_id), None)
+
+
+def set_live_channels(crate_id: str, picks) -> CrateConfig:
+    """Save which channels the portal's live wall shows for one crate.
+
+    The file is rewritten whole (it is a handful of entries) and every other
+    field is carried through verbatim -- passwords included, which is why the
+    raw file is read again here rather than reconstructed from `public()`.
+    """
+    cleaned = clean_live(picks)
+    with _lock:
+        raw = json.loads(CRATE_FILE.read_text(encoding="utf-8")) if CRATE_FILE.is_file() else {"crates": []}
+        wrapped = isinstance(raw, dict)
+        entries = raw.get("crates", []) if wrapped else raw
+        found = False
+        for entry in entries:
+            if str(entry.get("id")) == crate_id:
+                entry["live_channels"] = [dict(pick) for pick in cleaned]
+                found = True
+        if not found:
+            raise KeyError(crate_id)
+        CRATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = CRATE_FILE.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(raw if wrapped else entries, ensure_ascii=False, indent=2) + "\n",
+                             encoding="utf-8")
+        temporary.replace(CRATE_FILE)
+        global _cache
+        _cache = None
+    return find_crate(crate_id)

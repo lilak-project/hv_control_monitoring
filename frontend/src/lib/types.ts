@@ -78,6 +78,12 @@ export interface SnapshotSummary {
   note: string
 }
 
+export interface LiveChannel {
+  slot: number
+  channel: number
+  name: string
+}
+
 export interface Crate {
   id: string
   label: string
@@ -86,6 +92,8 @@ export interface Crate {
   username: string
   note: string
   latest: SnapshotSummary | null
+  /** Channels shown on the LILAK portal's live wall. */
+  live_channels: LiveChannel[]
 }
 
 export interface Day {

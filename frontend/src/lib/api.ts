@@ -1,4 +1,4 @@
-import type { Crate, Day, Snapshot, SnapshotSummary } from "./types"
+import type { Crate, Day, LiveChannel, Snapshot, SnapshotSummary } from "./types"
 
 import { url } from "@/lib/portal-base"
 
@@ -56,6 +56,15 @@ export const api = {
 
   remove: (crate: string, id: string) =>
     request<void>(`/api/crates/${crate}/snapshots/${id}`, { method: "DELETE" }),
+
+  /** Which channels this crate shows on the LILAK portal's live wall. Config
+   *  only -- saving this never touches the crate. */
+  setLiveChannels: (crate: string, channels: LiveChannel[]) =>
+    request<{ crate: string; channels: LiveChannel[] }>(`/api/crates/${crate}/live-channels`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channels }),
+    }),
 
   // Used as an <a href>, not fetched -- so it carries the prefix itself.
   csvUrl: (crate: string, id: string) => url(`/api/crates/${crate}/snapshots/${id}/csv`),
