@@ -62,20 +62,23 @@ def live() -> dict:
     The reading comes from the same short-lived cache the elog fills use
     (app/elog.live_reading), so the wall polling every few seconds costs at
     most one crate read per HV_LIVE_MAX_AGE seconds and writes no snapshot.
-    Each crate contributes its counts; a crate with channels picked in the UI
-    ("LIVE" on a channel row) also contributes one tile per channel.
+    Each crate contributes its counts unless its summary is switched off in the
+    UI; a crate with channels picked ("LIVE" on a channel row) also contributes
+    one tile per channel. A crate with neither is not read at all.
     """
     from . import elog as elog_mod
 
     items = []
     crates = load_crates()
-    for crate in crates:
-        prefix = f"{crate.label or crate.id} · " if len(crates) > 1 else ""
+    shown = [crate for crate in crates if crate.live_summary or crate.live_channels]
+    for crate in shown:
+        prefix = f"{crate.label or crate.id} · " if len(shown) > 1 else ""
         reading, age, source = elog_mod.live_reading(crate)
         if reading is None:
             items.append({"label": crate.label or crate.id, "value": "—", "unit": "", "state": "down",
                           "sub": "unreachable"})
             continue
+
         rows = {(board["slot"], row["channel"]): (board, row)
                 for board in reading.get("boards") or []
                 for row in board.get("rows") or []}
@@ -91,10 +94,11 @@ def live() -> dict:
                 trips += 1
         stale = age is not None and age > 60
         sub = "" if not stale else f"{int(age)} s old"
-        items.append({"label": prefix + "on", "value": str(powered), "unit": "ch",
-                      "state": "warn" if stale else ("ok" if powered else ""), "sub": sub})
-        items.append({"label": prefix + "trip", "value": str(trips), "unit": "", "state": "trip" if trips else ""})
-        items.append({"label": prefix + "alarm", "value": str(faults), "unit": "", "state": "alarm" if faults else ""})
+        if crate.live_summary:
+            items.append({"label": prefix + "on", "value": str(powered), "unit": "ch",
+                          "state": "warn" if stale else ("ok" if powered else ""), "sub": sub})
+            items.append({"label": prefix + "trip", "value": str(trips), "unit": "", "state": "trip" if trips else ""})
+            items.append({"label": prefix + "alarm", "value": str(faults), "unit": "", "state": "alarm" if faults else ""})
 
         for pick in crate.live_channels:
             found = rows.get((pick["slot"], pick["channel"]))

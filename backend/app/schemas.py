@@ -28,6 +28,7 @@ class Crate(BaseModel):
     live_channels: list[LiveChannel] = Field(
         default_factory=list, description="Channels shown on the portal's live wall."
     )
+    live_summary: bool = Field(True, description="Whether the wall shows this crate's on/trip/alarm counts.")
 
 
 class SnapshotSummary(BaseModel):

@@ -57,8 +57,9 @@ export default function App() {
     faultsOnly: false,
   })
 
-  /** Channels on the portal's live wall, for the crate on screen. */
+  /** What the portal's live wall shows for the crate on screen. */
   const [livePicks, setLivePicks] = useState<{ slot: number; channel: number; name: string }[]>([])
+  const [liveSummary, setLiveSummary] = useState(true)
 
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -113,7 +114,7 @@ export default function App() {
         : [...livePicks, { slot, channel, name: "" }].sort((a, b) => a.slot - b.slot || a.channel - b.channel)
       setLivePicks(next)                                  // optimistic
       api
-        .setLiveChannels(crateId, next)
+        .setLive(crateId, { channels: next })
         .then((saved) => {
           setLivePicks(saved.channels)
           setCrates((all) =>
@@ -128,6 +129,25 @@ export default function App() {
     [crateId, livePicks],
   )
 
+  /** Show or hide this crate's on/trip/alarm counts on the portal's live wall. */
+  const toggleLiveSummary = useCallback(() => {
+    if (!crateId) return
+    const next = !liveSummary
+    setLiveSummary(next)                                  // optimistic
+    api
+      .setLive(crateId, { summary: next })
+      .then((saved) => {
+        setLiveSummary(saved.summary)
+        setCrates((all) =>
+          all.map((crate) => (crate.id === crateId ? { ...crate, live_summary: saved.summary } : crate)),
+        )
+      })
+      .catch((err) => {
+        setLiveSummary(!next)
+        fail(err, "Could not save the live summary")
+      })
+  }, [crateId, liveSummary])
+
   // Switching crate resets everything that belongs to the old one, then opens
   // its most recent snapshot so the page is never blank when there is history.
   useEffect(() => {
@@ -138,7 +158,9 @@ export default function App() {
     setPinnedBaseline(null)
     setDay(null)
     setError(null)
-    setLivePicks(crates.find((crate) => crate.id === crateId)?.live_channels ?? [])
+    const chosen = crates.find((crate) => crate.id === crateId)
+    setLivePicks(chosen?.live_channels ?? [])
+    setLiveSummary(chosen?.live_summary ?? true)
 
     refreshHistory(crateId, null)
       .then(async (entries) => {
@@ -312,6 +334,22 @@ export default function App() {
           title="Read the crate now (R)"
         >
           Snapshot
+        </Button>
+
+        {/* Whether this crate's counts appear on the LILAK portal's live wall.
+            Config only: pressing it never reads the crate. */}
+        <Button
+          variant={liveSummary ? "filled" : "default"}
+          color="orange"
+          disabled={!crateId}
+          onClick={toggleLiveSummary}
+          title={
+            liveSummary
+              ? "This crate's on / trip / alarm counts are on the portal's live wall — click to take them off"
+              : "This crate's counts are off the portal's live wall — click to put them back"
+          }
+        >
+          {liveSummary ? "live: on" : "live: off"}
         </Button>
 
         {current ? (

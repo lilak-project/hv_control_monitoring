@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .. import snaplog
 from ..schemas import CrateStatus
-from ..store import find_crate, load_crates, set_live_channels
+from ..store import find_crate, load_crates, set_live
 
 router = APIRouter(prefix="/api/crates", tags=["crates"])
 
@@ -30,26 +30,34 @@ class LivePick(BaseModel):
     name: str = Field("", max_length=60, description="What to call it on the wall; blank = the channel's own name.")
 
 
-class LiveChannels(BaseModel):
-    channels: list[LivePick] = Field(default_factory=list)
+class LiveSettings(BaseModel):
+    channels: list[LivePick] | None = Field(None, description="Omit to leave the channel picks alone.")
+    summary: bool | None = Field(None, description="Whether the wall shows this crate's on/trip/alarm counts.")
 
 
-@router.get("/{crate_id}/live-channels", summary="Channels this crate shows on the portal's live wall")
+def _live_view(crate) -> dict:
+    return {"crate": crate.id, "channels": [dict(pick) for pick in crate.live_channels],
+            "summary": crate.live_summary}
+
+
+@router.get("/{crate_id}/live-channels", summary="What this crate shows on the portal's live wall")
 def get_live_channels(crate_id: str) -> dict:
     crate = find_crate(crate_id)
     if crate is None:
         raise HTTPException(404, f"no crate '{crate_id}'")
-    return {"crate": crate.id, "channels": [dict(pick) for pick in crate.live_channels]}
+    return _live_view(crate)
 
 
-@router.put("/{crate_id}/live-channels", summary="Choose the channels for the portal's live wall")
-def put_live_channels(crate_id: str, body: LiveChannels) -> dict:
-    """Nothing is read from the crate here -- this only records which channels
-    the live wall should show, in the order given."""
+@router.put("/{crate_id}/live-channels", summary="Choose what this crate shows on the portal's live wall")
+def put_live_channels(crate_id: str, body: LiveSettings) -> dict:
+    """Nothing is read from the crate here -- this only records what the live
+    wall should show: the channel picks, and whether the summary counts appear."""
     try:
-        crate = set_live_channels(crate_id, [pick.model_dump() for pick in body.channels])
+        crate = set_live(crate_id,
+                         picks=None if body.channels is None else [pick.model_dump() for pick in body.channels],
+                         summary=body.summary)
     except KeyError:
         raise HTTPException(404, f"no crate '{crate_id}'") from None
     except (OSError, ValueError) as err:
         raise HTTPException(500, f"could not save: {err}") from None
-    return {"crate": crate.id, "channels": [dict(pick) for pick in crate.live_channels]}
+    return _live_view(crate)

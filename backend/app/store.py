@@ -26,6 +26,10 @@ class CrateConfig:
     #: they were ticked: [{"slot": 1, "channel": 0, "name": "Si det"}]. Empty
     #: means the summary counts only.
     live_channels: tuple[dict, ...] = ()
+    #: Whether the wall shows this crate's on/trip/alarm counts. A crate that is
+    #: registered but not in use (no route to it, powered down for the season)
+    #: is turned off here rather than deleted, so its history stays.
+    live_summary: bool = True
 
     def public(self) -> dict[str, Any]:
         """What the browser is allowed to see -- never the password."""
@@ -37,6 +41,7 @@ class CrateConfig:
             "username": self.username,
             "note": self.note,
             "live_channels": [dict(pick) for pick in self.live_channels],
+            "live_summary": self.live_summary,
         }
 
 
@@ -53,6 +58,7 @@ def _parse(entry: dict[str, Any]) -> CrateConfig:
         password=str(entry.get("password", "admin")),
         note=str(entry.get("note", "")),
         live_channels=clean_live(entry.get("live_channels")),
+        live_summary=bool(entry.get("live_summary", True)),
     )
 
 
@@ -95,14 +101,15 @@ def find_crate(crate_id: str) -> CrateConfig | None:
     return next((crate for crate in load_crates() if crate.id == crate_id), None)
 
 
-def set_live_channels(crate_id: str, picks) -> CrateConfig:
-    """Save which channels the portal's live wall shows for one crate.
+def set_live(crate_id: str, picks=None, summary: bool | None = None) -> CrateConfig:
+    """Save what the portal's live wall shows for one crate: which channels, and
+    whether its summary counts appear at all.
 
     The file is rewritten whole (it is a handful of entries) and every other
     field is carried through verbatim -- passwords included, which is why the
     raw file is read again here rather than reconstructed from `public()`.
     """
-    cleaned = clean_live(picks)
+    cleaned = None if picks is None else clean_live(picks)
     with _lock:
         raw = json.loads(CRATE_FILE.read_text(encoding="utf-8")) if CRATE_FILE.is_file() else {"crates": []}
         wrapped = isinstance(raw, dict)
@@ -110,7 +117,10 @@ def set_live_channels(crate_id: str, picks) -> CrateConfig:
         found = False
         for entry in entries:
             if str(entry.get("id")) == crate_id:
-                entry["live_channels"] = [dict(pick) for pick in cleaned]
+                if cleaned is not None:
+                    entry["live_channels"] = [dict(pick) for pick in cleaned]
+                if summary is not None:
+                    entry["live_summary"] = bool(summary)
                 found = True
         if not found:
             raise KeyError(crate_id)

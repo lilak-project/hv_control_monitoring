@@ -94,6 +94,8 @@ export interface Crate {
   latest: SnapshotSummary | null
   /** Channels shown on the LILAK portal's live wall. */
   live_channels: LiveChannel[]
+  /** Whether the wall shows this crate's on/trip/alarm counts. */
+  live_summary: boolean
 }
 
 export interface Day {
