@@ -168,6 +168,16 @@ def save(snapshot: dict[str, Any], note: str = "") -> dict[str, Any]:
     return snapshot
 
 
+def path_of(crate_id: str, snapshot_id: str) -> Path:
+    """Where a saved snapshot lives on disk.
+
+    Public because the elog reply names the file it just wrote: a logbook entry
+    that says "48 on, 2 in alarm" is only auditable if the reading behind it can
+    be opened later.
+    """
+    return _path(crate_id, snapshot_id)
+
+
 def load(crate_id: str, snapshot_id: str) -> dict[str, Any]:
     path = _path(crate_id, snapshot_id)
     if not path.is_file():

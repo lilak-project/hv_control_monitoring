@@ -159,25 +159,51 @@ MAX_AGE_SEC = float(os.environ.get("HV_ELOG_MAX_AGE", "30"))
 #: the last reading. elog's whole round trip has five seconds.
 BUSY_WAIT_SEC = float(os.environ.get("HV_ELOG_BUSY_WAIT", "1.5"))
 
+#: The two alarm thresholds, as percentages. Configuration, not live state --
+#: they are part of what the numbers MEAN, so they are also written into the
+#: body of every entry rather than left implicit.
+ALARM_V_PCT = float(os.environ.get("HV_ALARM_V_PCT", "5"))
+ALARM_I_PCT = float(os.environ.get("HV_ALARM_I_PCT", "50"))
+
+#: Never archive more often than this from a webhook fill. The archive is the
+#: record of readings somebody chose to keep; a scheduled fill every minute is
+#: welcome in it, elog's realtime mode (twice a second) would bury everything
+#: else within an hour.
+SNAPSHOT_MIN_INTERVAL = float(os.environ.get("HV_ELOG_SNAPSHOT_MIN_INTERVAL", "60"))
+
+#: Alarm lines listed in the body before it starts saying "and N more".
+BODY_ROWS = int(os.environ.get("HV_ELOG_BODY_ROWS", "15"))
+
 #: Fixed, whatever cards are in the crate.
 #:
 #: Fifty-six channels times name/VMon/IMon/on-off would be over a hundred and
 #: fifty fields, and swapping a card would change the list and fork the format.
-#: So the numbers worth plotting are declared as numbers, and the per-channel
-#: detail -- which is a table, and reads like one -- goes in the body.
+#: What a logbook wants at a glance is four numbers -- how much is on, how much
+#: tripped, and the two alarm counts -- so those are the numbers, the per-channel
+#: detail goes to a snapshot FILE whose path is in the entry, and the body holds
+#: only the channels that are actually saying something.
+#:
+#: Labels are static on purpose even though the thresholds are configurable:
+#: elog matches a format by its field signature, so a label that moved with a
+#: setting would fork the format the first time somebody tuned it.
 LOG_FIELDS = [
     number("channels_on", "Channels on", "ch"),
+    number("trips", "Tripped", "ch"),
+    number("alarm_v", "V alarm", "ch"),
+    number("alarm_i", "I alarm", "ch"),
     number("channels_total", "Channels total", "ch"),
-    number("faults", "Channels in fault", "ch"),
     number("reading_age_s", "Age of this reading", "s", metric=False),
     text("crate", "Crate"),
     text("taken_at", "Reading taken at"),
-    body("Every channel"),
+    text("snapshot", "Snapshot file"),
+    body("Alarms"),
 ]
 
 _lock = threading.Lock()
 #: crate id -> (monotonic seconds when taken, the reading)
 _cache: dict[str, tuple[float, dict]] = {}
+#: crate id -> (monotonic seconds when archived, the path written)
+_archived: dict[str, tuple[float, str]] = {}
 
 
 def _cached(crate_id: str) -> tuple[float, dict] | None:
@@ -197,10 +223,6 @@ def _reading(crate) -> tuple[dict | None, float | None, str]:
     endpoint took, and the newest archived snapshot. The archive matters: a
     service that has just restarted has no cache, and an hour-old reading
     labelled as an hour old is far better for a logbook than a blank.
-
-    Deliberately does NOT archive what it reads. The archive is the record of
-    snapshots somebody chose to take; filling it twice a minute from a webhook
-    would bury those.
     """
     held = _cached(crate.id)
     if held is not None and time.monotonic() - held[0] < MAX_AGE_SEC:
@@ -250,24 +272,6 @@ def _unit(board: dict, param: str) -> str:
     return ""
 
 
-def _rows(reading: dict) -> list[str]:
-    """One line per channel: slot, channel, name, VMon, IMon, and on or off."""
-    lines = []
-    for board in reading.get("boards", []):
-        volt_unit = _unit(board, "VMon")
-        current_unit = _unit(board, "IMon")
-        for row in board.get("rows", []):
-            values = row.get("values", {})
-            fault = " FAULT" if (row.get("status") or {}).get("fault") else ""
-            lines.append(
-                f"{board['slot']:>2}.{row['channel']:<3} {row.get('name') or '':<22} "
-                f"{_fmt(values.get('VMon')):>10} {volt_unit:<3}"
-                f"{_fmt(values.get('IMon')):>10} {current_unit:<3}"
-                f"{'on ' if values.get('Pw') == 1 else 'off'}{fault}"
-            )
-    return lines
-
-
 def _fmt(number_value) -> str:
     if number_value is None:
         return "—"
@@ -277,20 +281,125 @@ def _fmt(number_value) -> str:
         return str(number_value)
 
 
-def _counts(reading: dict) -> tuple[int, int, int]:
-    total = on = faults = 0
+def _pct_off(monitor, setting) -> float | None:
+    """How far a monitored value sits from its setting, as a percent of the setting.
+
+    None when there is nothing to compare against: a setting of zero has no
+    percentage, and a channel that reported no value is not a channel reading
+    zero.
+    """
+    try:
+        setting = float(setting)
+        monitor = float(monitor)
+    except (TypeError, ValueError):
+        return None
+    if setting == 0:
+        return None
+    return abs(monitor - setting) / abs(setting) * 100.0
+
+
+def _metrics(reading: dict) -> tuple[dict[str, int], list[str]]:
+    """The four numbers, and one line for each channel that earned a mention.
+
+    Both alarms are counted over POWERED, SETTLED channels only, and that is not
+    a detail. A channel that is off reads VMon 0 against a V0Set of 112, which is
+    100 % away from its setting -- include those and the V alarm reads "every
+    channel that is not on", which is noise wearing an alarm's name. A channel
+    on its way up or down is legitimately far from its setting for as long as
+    the ramp lasts, so ramping channels are skipped too.
+    """
+    counts = {"total": 0, "on": 0, "trips": 0, "alarm_v": 0, "alarm_i": 0}
+    lines: list[str] = []
+
     for board in reading.get("boards", []):
+        volt_unit = _unit(board, "VMon")
+        current_unit = _unit(board, "IMon")
         for row in board.get("rows", []):
-            total += 1
-            if row.get("values", {}).get("Pw") == 1:
-                on += 1
-            if (row.get("status") or {}).get("fault"):
-                faults += 1
-    return on, total, faults
+            counts["total"] += 1
+            values = row.get("values", {})
+            flags = (row.get("status") or {}).get("flags") or []
+            powered = values.get("Pw") == 1
+            if powered:
+                counts["on"] += 1
+
+            where = f"{board['slot']:>2}.{row['channel']:<3} {row.get('name') or '':<20}"
+
+            # A trip is counted wherever it is found: a tripped channel has
+            # usually switched itself off, so gating this on `powered` would
+            # hide exactly the ones worth reporting.
+            tripped = "Internal trip" in flags or "External trip" in flags
+            if tripped:
+                counts["trips"] += 1
+                lines.append(f"{where} TRIP  {', '.join(flags)}")
+                continue
+
+            ramping = "Ramp up" in flags or "Ramp down" in flags
+            if not powered or ramping:
+                continue
+
+            v_off = _pct_off(values.get("VMon"), values.get("V0Set"))
+            if v_off is not None and v_off >= ALARM_V_PCT:
+                counts["alarm_v"] += 1
+                lines.append(f"{where} V     {_fmt(values.get('VMon'))} {volt_unit} "
+                             f"vs set {_fmt(values.get('V0Set'))} {volt_unit} "
+                             f"({v_off:.1f} % off)")
+
+            i_off = _pct_off(values.get("IMon"), values.get("I0Set"))
+            if i_off is not None and i_off <= ALARM_I_PCT:
+                counts["alarm_i"] += 1
+                lines.append(f"{where} I     {_fmt(values.get('IMon'))} {current_unit} "
+                             f"of limit {_fmt(values.get('I0Set'))} {current_unit} "
+                             f"({i_off:.1f} % below)")
+
+    return counts, lines
+
+
+def _archive(reading: dict, crate_id: str, mode: str) -> str:
+    """Keep this reading, and say where it went. Returns "" when nothing was kept.
+
+    A reading loaded from the archive already has an id and is not written
+    again. Realtime fills never write -- see SNAPSHOT_MIN_INTERVAL.
+    """
+    existing = reading.get("id")
+    if existing:
+        try:
+            return str(snaplog.path_of(crate_id, str(existing)))
+        except Exception:                     # pragma: no cover - bad id in a file
+            return ""
+
+    with _lock:
+        last = _archived.get(crate_id)
+    if mode == "realtime":
+        return last[1] if last else ""
+    if last is not None and time.monotonic() - last[0] < SNAPSHOT_MIN_INTERVAL:
+        return last[1]
+
+    try:
+        saved = snaplog.save(reading, note=f"elog {mode}")
+        written = str(snaplog.path_of(crate_id, saved["id"]))
+    except Exception as err:
+        # Failing to archive must not fail the reply: the numbers are still
+        # true, they just cannot be looked up later.
+        log.warning("could not archive the reading for %s: %s", crate_id, err)
+        return last[1] if last else ""
+
+    with _lock:
+        _archived[crate_id] = (time.monotonic(), written)
+    return written
+
+
+def _blank(crate_label: str, why: str) -> dict:
+    return {
+        "channels_on": value(None), "trips": value(None),
+        "alarm_v": value(None), "alarm_i": value(None),
+        "channels_total": value(None), "reading_age_s": value(None),
+        "crate": crate_label, "taken_at": "", "snapshot": "",
+        "body": why,
+    }
 
 
 async def read(envelope: dict) -> dict:
-    """Every channel of the first configured crate.
+    """Four numbers, a file path, and only the channels that are saying something.
 
     One crate, not all of them: a log format has one set of fields, and a
     second crate's channels would have nowhere to go. Which crate is the first
@@ -298,49 +407,60 @@ async def read(envelope: dict) -> dict:
     """
     crates = await run_in_threadpool(load_crates)
     if not crates:
-        return {
-            "channels_on": value(None), "channels_total": value(None),
-            "faults": value(None), "reading_age_s": value(None),
-            "crate": "", "taken_at": "",
-            "body": "No crate is configured in this service.",
-        }
+        return _blank("", "No crate is configured in this service.")
 
     crate = crates[0]
+    mode = str(envelope.get("mode") or "task")
     # A crate read is a blocking C call; off the event loop it goes.
     reading, age, source = await run_in_threadpool(_reading, crate)
 
     if reading is None:
-        return {
-            "channels_on": value(None), "channels_total": value(None),
-            "faults": value(None), "reading_age_s": value(None),
-            "crate": crate.label or crate.id, "taken_at": "",
-            "body": (f"{crate.label or crate.id} ({crate.host}) could not be read and "
-                     "there is no earlier reading to fall back on."),
-        }
+        return _blank(crate.label or crate.id,
+                      f"{crate.label or crate.id} ({crate.host}) could not be read and "
+                      "there is no earlier reading to fall back on.")
 
-    on, total, faults = _counts(reading)
-    lines = _rows(reading) or ["The crate reported no channels."]
+    counts, alarms = _metrics(reading)
+    written = await run_in_threadpool(_archive, reading, crate.id, mode)
+
+    head = [f"{counts['on']} of {counts['total']} channels on · "
+            f"{counts['trips']} tripped · "
+            f"{counts['alarm_v']} V alarm (≥{ALARM_V_PCT:g} % off set) · "
+            f"{counts['alarm_i']} I alarm (within {ALARM_I_PCT:g} % of limit)"]
+    if alarms:
+        head.append("")
+        head.extend(alarms[:BODY_ROWS])
+        if len(alarms) > BODY_ROWS:
+            head.append(f"… and {len(alarms) - BODY_ROWS} more")
+    else:
+        head.append("Nothing tripped and nothing in alarm.")
+    if written:
+        head += ["", f"snapshot: {written}"]
     if source != "live":
         note = ("from this service's last reading" if source == "cached"
                 else "from the newest archived snapshot")
-        lines.append("")
-        lines.append(f"⚠ the crate did not answer just now; the above is {note}"
-                     + (f", {age:,.0f} s old" if age is not None else ""))
+        head.append(f"⚠ the crate did not answer just now; the above is {note}"
+                    + (f", {age:,.0f} s old" if age is not None else ""))
 
     return {
-        "channels_on": value(on),
-        "channels_total": value(total),
-        "faults": value(faults),
+        "channels_on": value(counts["on"]),
+        "trips": value(counts["trips"]),
+        "alarm_v": value(counts["alarm_v"]),
+        "alarm_i": value(counts["alarm_i"]),
+        "channels_total": value(counts["total"]),
         "reading_age_s": value(None if age is None else round(age, 1)),
         "crate": crate.label or crate.id,
         "taken_at": reading.get("taken_at", ""),
-        "body": "\n".join(lines),
+        "snapshot": written,
+        "body": "\n".join(head),
     }
 
 
 router = make_router(
     service_name="HV Monitoring",
-    description="CAEN crate readout — per-channel name, VMon, IMon and on/off, plus the powered/fault counts.",
+    description=("CAEN crate readout, compressed: channels on, tripped, and two alarm "
+                 "counts (VMon off its set point, IMon near its current limit). The "
+                 "full per-channel reading is archived as a snapshot file and the "
+                 "entry names it."),
     log_fields=LOG_FIELDS,
     read=read,
     directory=str(SNAPSHOT_ROOT),
