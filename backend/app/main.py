@@ -58,33 +58,34 @@ app.include_router(elog.router)
 @app.get("/api/live", tags=["meta"], summary="Compact numbers for the portal's live mode")
 def live() -> dict:
     """From the most recent SAVED snapshot of each crate -- never the hardware:
-    a crate read costs seconds and this is polled every few."""
+    a crate read costs seconds and this is polled every few. `snaplog.latest`
+    is the one-line summary (powered/faults counts); the trip count needs the
+    channel rows, so the full file is loaded too."""
     from . import snaplog
+    crates = load_crates()
     items = []
-    for crate in load_crates():
-        snap = snaplog.latest(crate.id)
-        if not snap:
+    for crate in crates:
+        summary = snaplog.latest(crate.id)
+        if not summary:
             items.append({"label": crate.id, "value": "—", "unit": "", "state": "off", "sub": "no snapshot yet"})
             continue
-        powered = faults = tripped = 0
-        for board in snap.get("boards", []):
-            for row in board.get("rows", []) or board.get("channels_rows", []) or []:
-                status = row.get("status") or {}
-                flags = [str(f).upper() for f in (status.get("flags") or [])]
-                if (row.get("values") or {}).get("Pw") == 1:
-                    powered += 1
-                if status.get("fault"):
-                    faults += 1
-                if any("TRIP" in f for f in flags):
-                    tripped += 1
-            if not (board.get("rows") or board.get("channels_rows")):
-                powered += int(board.get("powered") or 0)
-                faults += int(board.get("faults") or 0)
-        prefix = f"{crate.id} · " if len(load_crates()) > 1 else ""
+        powered = int(summary.get("powered") or 0)
+        faults = int(summary.get("faults") or 0)
+        tripped = 0
+        try:
+            full = snaplog.load(crate.id, summary["id"])
+            for board in full.get("boards") or []:
+                for row in board.get("rows") or []:
+                    flags = [str(f).upper() for f in ((row.get("status") or {}).get("flags") or [])]
+                    if any("TRIP" in f for f in flags):
+                        tripped += 1
+        except Exception:                          # a missing/old file: counts from the summary still stand
+            pass
+        prefix = f"{crate.id} · " if len(crates) > 1 else ""
         items.append({"label": prefix + "on", "value": str(powered), "unit": "ch", "state": "ok" if powered else ""})
         items.append({"label": prefix + "trip", "value": str(tripped), "unit": "", "state": "trip" if tripped else ""})
         items.append({"label": prefix + "alarm", "value": str(faults), "unit": "", "state": "alarm" if faults else "",
-                      "sub": (snap.get("taken_at_local") or snap.get("taken_at") or "")[:16]})
+                      "sub": (summary.get("taken_at_local") or summary.get("taken_at") or "")[:16]})
     return {"ok": True, "items": items}
 
 
