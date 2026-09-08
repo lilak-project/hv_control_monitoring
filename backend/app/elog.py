@@ -172,10 +172,16 @@ ALARM_I_PCT = float(os.environ.get("HV_ALARM_I_PCT", "50"))
 SNAPSHOT_MIN_INTERVAL = float(os.environ.get("HV_ELOG_SNAPSHOT_MIN_INTERVAL", "60"))
 
 #: How stale a cached reading may be before the live wall asks the crate again.
-#: The wall polls every few seconds; a crate read takes seconds and blocks the
-#: crate, so it is answered from the cache in between. Raise it to touch the
-#: crate less; the tile always says how old its numbers are.
-LIVE_MAX_AGE_SEC = float(os.environ.get("HV_LIVE_MAX_AGE", str(MAX_AGE_SEC)))
+#:
+#: Ten minutes, not seconds: every read is a LOGIN, and the CAEN GECO window on
+#: the crate PC announces "Someone has connected to …" for each one. A wall that
+#: swept every few seconds turned that into a permanent banner in front of the
+#: operator. At ten minutes the wall adds nothing beyond the elog fills, which
+#: log in on their own schedule anyway, and the tile says how old its numbers
+#: are. Lower it (HV_LIVE_MAX_AGE, seconds) if a fresher wall is worth the
+#: banner; raise it further and the wall simply shows the last reading anyone
+#: took.
+LIVE_MAX_AGE_SEC = float(os.environ.get("HV_LIVE_MAX_AGE", "600"))
 
 #: After a failed login the live wall stops trying for this long. A crate that
 #: is off or on an unrouted subnet fails slowly -- a login timeout every poll

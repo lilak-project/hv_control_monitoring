@@ -92,8 +92,11 @@ def live() -> dict:
                 faults += 1
             if any("TRIP" in f for f in flags):
                 trips += 1
-        stale = age is not None and age > 60
-        sub = "" if not stale else f"{int(age)} s old"
+        # The age is part of the reading: these numbers are minutes old by
+        # design (see elog.LIVE_MAX_AGE_SEC), and a wall that hid that would be
+        # claiming a liveness it does not have.
+        stale = age is not None and age > 90
+        sub = "" if not stale else (f"{int(age / 60)} min old" if age >= 120 else f"{int(age)} s old")
         if crate.live_summary:
             items.append({"label": prefix + "on", "value": str(powered), "unit": "ch",
                           "state": "warn" if stale else ("ok" if powered else ""), "sub": sub})
