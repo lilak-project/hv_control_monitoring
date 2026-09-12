@@ -33,11 +33,15 @@ class LivePick(BaseModel):
 class LiveSettings(BaseModel):
     channels: list[LivePick] | None = Field(None, description="Omit to leave the channel picks alone.")
     summary: bool | None = Field(None, description="Whether the wall shows this crate's on/trip/alarm counts.")
+    archive_interval_min: float | None = Field(
+        None, ge=0, le=1440,
+        description="Minutes between archived snapshots; 0 keeps none on a timer.")
 
 
 def _live_view(crate) -> dict:
     return {"crate": crate.id, "channels": [dict(pick) for pick in crate.live_channels],
-            "summary": crate.live_summary}
+            "summary": crate.live_summary,
+            "archive_interval_min": crate.archive_interval_min}
 
 
 @router.get("/{crate_id}/live-channels", summary="What this crate shows on the portal's live wall")
@@ -51,11 +55,13 @@ def get_live_channels(crate_id: str) -> dict:
 @router.put("/{crate_id}/live-channels", summary="Choose what this crate shows on the portal's live wall")
 def put_live_channels(crate_id: str, body: LiveSettings) -> dict:
     """Nothing is read from the crate here -- this only records what the live
-    wall should show: the channel picks, and whether the summary counts appear."""
+    wall should show (the channel picks, and whether the summary counts appear)
+    and how often the crate's state is archived."""
     try:
         crate = set_live(crate_id,
                          picks=None if body.channels is None else [pick.model_dump() for pick in body.channels],
-                         summary=body.summary)
+                         summary=body.summary,
+                         archive_interval_min=body.archive_interval_min)
     except KeyError:
         raise HTTPException(404, f"no crate '{crate_id}'") from None
     except (OSError, ValueError) as err:

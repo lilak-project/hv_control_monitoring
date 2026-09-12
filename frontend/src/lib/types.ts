@@ -96,6 +96,8 @@ export interface Crate {
   live_channels: LiveChannel[]
   /** Whether the wall shows this crate's on/trip/alarm counts. */
   live_summary: boolean
+  /** Minutes between archived snapshots; 0 keeps none on a timer. */
+  archive_interval_min: number
 }
 
 export interface Day {

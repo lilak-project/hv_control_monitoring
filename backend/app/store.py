@@ -13,6 +13,10 @@ _lock = threading.Lock()
 _cache: list[CrateConfig] | None = None
 
 
+#: Minutes between archived snapshots when a crate entry does not say.
+DEFAULT_ARCHIVE_MIN = 10.0
+
+
 @dataclass(frozen=True, slots=True)
 class CrateConfig:
     id: str
@@ -30,6 +34,18 @@ class CrateConfig:
     #: registered but not in use (no route to it, powered down for the season)
     #: is turned off here rather than deleted, so its history stays.
     live_summary: bool = True
+    #: Minutes between archived snapshots, 0 to keep none on a timer.
+    #: The default lives in DEFAULT_ARCHIVE_MIN, not here, because this is a
+    #: slotted dataclass -- reading the field off the CLASS gives the slot
+    #: descriptor, not the value, and every crate quietly inherited that object
+    #: as its interval.
+    #:
+    #: There has to be a timer. Snapshots used to appear only as a side effect
+    #: of elog fills, and when the live wall stopped archiving what it read, the
+    #: archive simply stopped -- two days of a crate's history missing with
+    #: nothing broken and nothing logged. A history that depends on somebody
+    #: else's traffic is not a history.
+    archive_interval_min: float = DEFAULT_ARCHIVE_MIN
 
     def public(self) -> dict[str, Any]:
         """What the browser is allowed to see -- never the password."""
@@ -42,6 +58,7 @@ class CrateConfig:
             "note": self.note,
             "live_channels": [dict(pick) for pick in self.live_channels],
             "live_summary": self.live_summary,
+            "archive_interval_min": self.archive_interval_min,
         }
 
 
@@ -59,7 +76,20 @@ def _parse(entry: dict[str, Any]) -> CrateConfig:
         note=str(entry.get("note", "")),
         live_channels=clean_live(entry.get("live_channels")),
         live_summary=bool(entry.get("live_summary", True)),
+        archive_interval_min=_minutes(entry.get("archive_interval_min")),
     )
+
+
+def _minutes(value) -> float:
+    """The archive interval, in minutes. A missing or unreadable value takes the
+    default rather than turning archiving off: silence is how the history went
+    missing in the first place."""
+    if value is None:
+        return DEFAULT_ARCHIVE_MIN
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return DEFAULT_ARCHIVE_MIN
 
 
 def clean_live(values) -> tuple[dict, ...]:
@@ -101,7 +131,8 @@ def find_crate(crate_id: str) -> CrateConfig | None:
     return next((crate for crate in load_crates() if crate.id == crate_id), None)
 
 
-def set_live(crate_id: str, picks=None, summary: bool | None = None) -> CrateConfig:
+def set_live(crate_id: str, picks=None, summary: bool | None = None,
+             archive_interval_min: float | None = None) -> CrateConfig:
     """Save what the portal's live wall shows for one crate: which channels, and
     whether its summary counts appear at all.
 
@@ -121,6 +152,8 @@ def set_live(crate_id: str, picks=None, summary: bool | None = None) -> CrateCon
                     entry["live_channels"] = [dict(pick) for pick in cleaned]
                 if summary is not None:
                     entry["live_summary"] = bool(summary)
+                if archive_interval_min is not None:
+                    entry["archive_interval_min"] = max(0.0, float(archive_interval_min))
                 found = True
         if not found:
             raise KeyError(crate_id)

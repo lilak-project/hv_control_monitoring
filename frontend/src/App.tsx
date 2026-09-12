@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Button, Checkbox, Group, Select, TextInput } from "@mantine/core"
+import { Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Tooltip } from "@mantine/core"
 import { notifications } from "@mantine/notifications"
 import { Camera, Check, ClipboardCopy, Download, List } from "lucide-react"
 
@@ -60,6 +60,7 @@ export default function App() {
   /** What the portal's live wall shows for the crate on screen. */
   const [livePicks, setLivePicks] = useState<{ slot: number; channel: number; name: string }[]>([])
   const [liveSummary, setLiveSummary] = useState(true)
+  const [archiveMin, setArchiveMin] = useState(10)
 
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -148,6 +149,30 @@ export default function App() {
       })
   }, [crateId, liveSummary])
 
+  /** How often this crate is archived, in minutes; 0 keeps none on a timer.
+   *  Saved on blur rather than per keystroke — every intermediate value of
+   *  "120" is a real interval, and 1 would have the timer sweeping the crate
+   *  (a login each time) while somebody was still typing. */
+  const saveArchiveMin = useCallback(
+    (minutes: number) => {
+      if (!crateId) return
+      api
+        .setLive(crateId, { archive_interval_min: minutes })
+        .then((saved) => {
+          setArchiveMin(saved.archive_interval_min)
+          setCrates((all) =>
+            all.map((crate) =>
+              crate.id === crateId
+                ? { ...crate, archive_interval_min: saved.archive_interval_min }
+                : crate,
+            ),
+          )
+        })
+        .catch((err) => fail(err, "Could not save the archive interval"))
+    },
+    [crateId],
+  )
+
   // Switching crate resets everything that belongs to the old one, then opens
   // its most recent snapshot so the page is never blank when there is history.
   useEffect(() => {
@@ -161,6 +186,7 @@ export default function App() {
     const chosen = crates.find((crate) => crate.id === crateId)
     setLivePicks(chosen?.live_channels ?? [])
     setLiveSummary(chosen?.live_summary ?? true)
+    setArchiveMin(chosen?.archive_interval_min ?? 10)
 
     refreshHistory(crateId, null)
       .then(async (entries) => {
@@ -351,6 +377,34 @@ export default function App() {
         >
           {liveSummary ? "live: on" : "live: off"}
         </Button>
+
+        {/* How often this crate is archived. Config only, like the button
+            beside it: typing here never reads the crate. */}
+        <Tooltip
+          label={
+            archiveMin > 0
+              ? `A snapshot is kept every ${archiveMin} min, reusing a reading the live wall already took where it can. 0 turns the timer off.`
+              : "Nothing is kept on a timer — only what you snapshot by hand or what elog fills."
+          }
+        >
+          <Group gap={4} wrap="nowrap">
+            <Text size="xs" c="dimmed">
+              archive
+            </Text>
+            <NumberInput
+              size="xs"
+              w={72}
+              min={0}
+              max={1440}
+              step={5}
+              disabled={!crateId}
+              value={archiveMin}
+              onChange={(value) => setArchiveMin(Number(value) || 0)}
+              onBlur={() => saveArchiveMin(archiveMin)}
+              suffix=" min"
+            />
+          </Group>
+        </Tooltip>
 
         {current ? (
           <>

@@ -1,8 +1,13 @@
 """CAEN HV monitoring service.
 
 Serves a JSON API and, once the frontend is built, the single-page UI from the
-same origin and port. There is no polling loop: a crate is read when someone
-asks for a snapshot, and every snapshot taken is kept.
+same origin and port.
+
+A crate is read when someone asks -- a snapshot from the UI, a fill from elog,
+the portal's live wall -- and on one timer of its own (app/archive.py), which
+is what keeps the history from depending on whether anybody happened to look.
+Every read is a login, so the timer reuses a recent reading rather than taking
+its own wherever it can.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from starlette.types import Scope
 
 from .caen import library_release
 from .config import SNAPSHOT_ROOT, STATIC_DIR
-from . import elog
+from . import archive, elog
 from .routers import crates, snapshots
 from .store import load_crates
 
@@ -53,6 +58,21 @@ app.include_router(crates.router)
 app.include_router(snapshots.router)
 # The LILAK elog asks this service to fill a task log; see app/elog.py.
 app.include_router(elog.router)
+
+
+@app.on_event("startup")
+def _start_archiver() -> None:
+    archive.start()
+
+
+@app.on_event("shutdown")
+def _stop_archiver() -> None:
+    archive.stop()
+
+
+@app.get("/api/archive-timer", tags=["meta"], summary="What the archive timer is doing")
+def archive_timer() -> list[dict]:
+    return archive.status()
 
 
 @app.get("/api/live", tags=["meta"], summary="Compact numbers for the portal's live mode")

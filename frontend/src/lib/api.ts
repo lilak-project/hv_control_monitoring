@@ -58,10 +58,14 @@ export const api = {
     request<void>(`/api/crates/${crate}/snapshots/${id}`, { method: "DELETE" }),
 
   /** What this crate shows on the LILAK portal's live wall: the channel picks,
-   *  and whether its on/trip/alarm counts appear. Either may be omitted to
-   *  leave it alone. Config only -- saving this never touches the crate. */
-  setLive: (crate: string, body: { channels?: LiveChannel[]; summary?: boolean }) =>
-    request<{ crate: string; channels: LiveChannel[]; summary: boolean }>(
+   *  and whether its on/trip/alarm counts appear, plus how often this crate is
+   *  archived. Any of them may be omitted to leave it alone. Config only --
+   *  saving this never touches the crate. */
+  setLive: (
+    crate: string,
+    body: { channels?: LiveChannel[]; summary?: boolean; archive_interval_min?: number },
+  ) =>
+    request<{ crate: string; channels: LiveChannel[]; summary: boolean; archive_interval_min: number }>(
       `/api/crates/${crate}/live-channels`,
       { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     ),
