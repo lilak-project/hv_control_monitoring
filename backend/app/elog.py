@@ -490,7 +490,10 @@ async def read(envelope: dict) -> dict:
         "crate": crate.label or crate.id,
         "taken_at": reading.get("taken_at", ""),
         "snapshot": written,
-        "body": "\n".join(head),
+        # Fenced, like actuator_monitoring's: elog renders a body as Markdown,
+        # which folds runs of spaces and single newlines into one space, so the
+        # aligned rows above arrive as one long line without it.
+        "body": "```\n" + "\n".join(head) + "\n```",
     }
 
 
