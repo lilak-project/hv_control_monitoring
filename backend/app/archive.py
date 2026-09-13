@@ -44,6 +44,15 @@ _thread: threading.Thread | None = None
 #: it does not owe.
 _last: dict[str, float] = {}
 
+#: crate id -> when we may try again after a failure, and whether the failure
+#: has been logged. A crate that cannot be reached -- one registered but
+#: powered down for the season, say -- was otherwise retried on every tick and
+#: said so in the log every time: a warning every twenty seconds, for ever,
+#: about a crate nobody expects to answer.
+RETRY_SEC = 600.0
+_retry_after: dict[str, float] = {}
+_complained: set[str] = set()
+
 
 def _seed(crate_id: str) -> float:
     """When this crate was last archived, as a monotonic instant.
@@ -67,6 +76,8 @@ def _seed(crate_id: str) -> float:
 def _due(crate: CrateConfig) -> bool:
     if crate.archive_interval_min <= 0:
         return False
+    if time.monotonic() < _retry_after.get(crate.id, 0.0):
+        return False
     if crate.id not in _last:
         _last[crate.id] = _seed(crate.id)
     return (time.monotonic() - _last[crate.id]) >= crate.archive_interval_min * 60.0
@@ -78,8 +89,19 @@ def _archive_one(crate: CrateConfig) -> None:
     # login. Older than that and `_reading` sweeps the crate itself.
     reading, age, source = elog._reading(crate, max_age=crate.archive_interval_min * 60.0)
     if reading is None:
-        log.warning("%s: no reading to archive (%s)", crate.id, source)
+        # Back off, and say so once. Retrying every tick would neither reach the
+        # crate nor stop filling the log, and the next interval is soon enough
+        # for a crate that has nothing to say.
+        _retry_after[crate.id] = time.monotonic() + min(RETRY_SEC, crate.archive_interval_min * 60.0)
+        if crate.id not in _complained:
+            _complained.add(crate.id)
+            log.warning("%s: cannot be read (%s); retrying every %.0f min, quietly",
+                        crate.id, source, min(RETRY_SEC, crate.archive_interval_min * 60.0) / 60.0)
         return
+    if crate.id in _complained:
+        _complained.discard(crate.id)
+        log.info("%s: readable again", crate.id)
+    _retry_after.pop(crate.id, None)
     if reading.get("id"):
         # It came out of the archive -- it is already kept, and writing it again
         # would file an old reading under a new time.
