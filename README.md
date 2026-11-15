@@ -11,6 +11,17 @@ makes a full sweep affordable: the whole crate comes back in about 150 ms.
 Read-only. The write side of the CAEN API is deliberately not bound — see
 [Safety](#safety).
 
+## Control and monitoring
+
+Two modes. **Monitor** reads the archive: every snapshot, the tables, the
+comparison, Copy and CSV. **Control** adds what touches the crate or what is
+kept: Snapshot (and `R`), the live-wall picks and summary, and the archive
+timer. Under the portal, control is for a portal manager or an admin of this
+service (a grant with admin ticked, to the person or a group); everyone else
+gets monitoring, and the server refuses their writes (`backend/app/access.py`,
+checked by `backend/tools/check_access.py`). Run alone, everything is allowed.
+The screens are drawn with the NEON kit (`../neon_ui`).
+
 ## Quick start
 
 ```bash

@@ -17,7 +17,7 @@
     "jsx": "react-jsx",
 
     /* Path alias */
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@neon": ["../../neon_ui/src/index.tsx"], "@neon/*": ["../../neon_ui/src/*"] },
 
     /* Linting */
     "noUnusedLocals": true,

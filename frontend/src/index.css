@@ -1,18 +1,19 @@
 @import "@fontsource-variable/geist-mono";
 
+/* HV on the DAQ look (neon_ui): its names point at NEON's tokens, so the dense
+   table follows bright and dark. Two colours only: on is the accent, a fault
+   is pink; a changed value is the accent, faintly (it is worth seeing, not
+   wrong). */
 :root {
-  color-scheme: light;
-
-  /* Colour means one thing each; nothing on this page is tinted for looks. */
-  --hv-on: #1f7a35;
-  --hv-fault-fg: #b02a1e;
-  --hv-fault-bg: #fdf0ee;
-  --hv-changed-bg: #fff6dd;
-  --hv-rule: #e6e8ea;
-  --hv-rule-strong: #c9cdd1;
-  --hv-zebra: #fafbfc;
-  --hv-dim: #7a8085;
-  --hv-head-bg: #f2f4f6;
+  --hv-on: var(--neon-ok);
+  --hv-fault-fg: var(--neon-alarm);
+  --hv-fault-bg: var(--neon-alarm-fill);
+  --hv-changed-bg: color-mix(in srgb, var(--neon-accent) 14%, transparent);
+  --hv-rule: var(--neon-line);
+  --hv-rule-strong: var(--neon-line);
+  --hv-zebra: var(--neon-zebra);
+  --hv-dim: var(--neon-dim);
+  --hv-head-bg: var(--neon-panel);
 }
 
 html,
@@ -23,8 +24,7 @@ body,
 
 body {
   margin: 0;
-  background: #fff;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* --- page frame -------------------------------------------------------- */
@@ -45,7 +45,9 @@ body {
   flex-wrap: wrap;
   padding: 4px 8px;
   border-bottom: 1px solid var(--hv-rule);
-  min-height: 30px;
+  /* A control's height plus its padding, in either mode (NEON rule 5). */
+  min-height: calc(var(--neon-control) + 8px);
+  box-sizing: border-box;
 }
 
 .bar-title {
@@ -111,7 +113,7 @@ body {
   padding: 2px 6px;
   font-size: 11px;
   font-weight: 600;
-  color: #3d4348;
+  color: var(--neon-dim);
 }
 
 /* A row is two controls, not one: the body opens the snapshot, the button at
@@ -159,7 +161,7 @@ body {
 }
 
 .history-row.is-baseline .history-compare {
-  color: #a5750f;
+  color: var(--neon-text);
   font-weight: 700;
 }
 
@@ -174,18 +176,18 @@ body {
 /* The snapshot on screen, and the one it is being compared against. A left
    bar rather than a fill, so the row's own colours still read. */
 .history-row.is-current {
-  background: #eaf2fd;
-  box-shadow: inset 3px 0 0 var(--mantine-color-blue-7);
+  background: color-mix(in srgb, var(--neon-accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--neon-accent);
 }
 
 .history-row.is-baseline {
-  box-shadow: inset 3px 0 0 #d69e2e;
+  box-shadow: inset 3px 0 0 var(--neon-dim);
 }
 
 .history-row.is-current.is-baseline {
   box-shadow:
-    inset 3px 0 0 var(--mantine-color-blue-7),
-    inset 6px 0 0 #d69e2e;
+    inset 3px 0 0 var(--neon-accent),
+    inset 6px 0 0 var(--neon-dim);
 }
 
 .history-note {
@@ -206,7 +208,7 @@ body {
   gap: 8px;
   flex-wrap: wrap;
   padding: 5px 8px 4px;
-  background: #fff;
+  background: var(--neon-panel);
 }
 
 .board-slot {
@@ -249,7 +251,7 @@ body {
 .grid td.stick {
   position: sticky;
   z-index: 1;
-  background: #fff;
+  background: var(--neon-panel);
   text-align: left;
 }
 
@@ -293,7 +295,7 @@ body {
 
 .grid tbody tr:hover td,
 .grid tbody tr:hover td.stick {
-  background: #eef4fb;
+  background: var(--neon-raise);
 }
 
 /* --- cell states ------------------------------------------------------- */
@@ -311,7 +313,7 @@ body {
    reading is on the cell's tooltip. */
 .changed {
   background: var(--hv-changed-bg) !important;
-  box-shadow: inset 0 -2px 0 #e5c56a;
+  box-shadow: inset 0 -2px 0 var(--neon-accent);
 }
 
 /* A status word with a fault bit set: the one thing on the page that should
@@ -338,7 +340,7 @@ tr.row-fault td.stick {
   border: 1px solid var(--hv-rule-strong);
   border-left: 3px solid var(--hv-fault-fg);
   background: var(--hv-fault-bg);
-  color: #5a2019;
+  color: var(--neon-alarm);
   font-size: 12px;
 }
 
@@ -383,18 +385,16 @@ tr.row-fault td.stick {
   font-size: 11px;
   letter-spacing: 0.04em;
   padding: 1px 7px;
-  border-radius: 999px;
   cursor: pointer;
-  color: var(--mantine-color-dimmed);
+  color: var(--neon-dim);
   background: transparent;
-  border: 1px solid var(--mantine-color-gray-4);
+  border: 1px solid var(--neon-line);
 }
-.live-pick:hover {
-  border-color: var(--mantine-color-orange-5);
-  color: var(--mantine-color-orange-7);
-}
+.live-pick:hover { border-color: var(--neon-accent); color: var(--neon-text); }
+/* Picked: lit like any picked thing. */
 .live-pick.is-on {
-  background: var(--mantine-color-orange-6);
-  border-color: var(--mantine-color-orange-6);
-  color: #fff;
+  background: color-mix(in srgb, var(--neon-accent) 18%, transparent);
+  border-color: var(--neon-accent);
+  color: var(--neon-text);
 }
+.hv-noticeline { padding: 6px 8px 0; }

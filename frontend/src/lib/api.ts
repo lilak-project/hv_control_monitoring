@@ -1,4 +1,5 @@
-import type { Crate, Day, LiveChannel, Snapshot, SnapshotSummary } from "./types"
+import type {
+  Me, Crate, Day, LiveChannel, Snapshot, SnapshotSummary } from "./types"
 
 import { url } from "@/lib/portal-base"
 
@@ -34,6 +35,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /** Who is looking, and whether they may control. */
+  me: () => request<Me>("/api/me"),
+
   crates: () => request<Crate[]>("/api/crates"),
 
   /** Read the crate now.  Slow by web standards -- it is a round trip to hardware. */

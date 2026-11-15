@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Button, Checkbox, Group, NumberInput, Select, Text, TextInput, Tooltip } from "@mantine/core"
+import { Button, Checkbox, Group, NumberInput, Text, TextInput, Tooltip } from "@mantine/core"
+import { Brand, Choice, Hold, NoticeLine, Screen, Spacer, Tabs, Tag, ThemeSwitch, type TabItem } from "@neon"
 import { notifications } from "@mantine/notifications"
 import { Camera, Check, ClipboardCopy, Download, List } from "lucide-react"
 
@@ -13,7 +14,7 @@ import { diffSnapshots } from "@/lib/diff"
 import type { RowFilter } from "@/lib/filter"
 import { ago, stampTime } from "@/lib/format"
 import { snapshotText } from "@/lib/report"
-import type { Crate, Day, Snapshot, SnapshotSummary } from "@/lib/types"
+import type { Crate, Day, Me, Snapshot, SnapshotSummary } from "@/lib/types"
 
 const COLUMN_KEY = "hv.columns"
 
@@ -36,7 +37,44 @@ function saveColumns(chosen: Set<string>): void {
   }
 }
 
+/** Remembered per browser: a controller who chose to just watch stays watching. */
+const MODE_KEY = "hv.mode"
+type Mode = "control" | "monitor"
+/** A portal role change reaches the page within this. */
+const ME_INTERVAL = 30000
+
+/**
+ * One service, two modes. Control reads a crate on demand (Snapshot) and sets
+ * what is kept and shown (archive timer, live wall); monitoring reads the
+ * archive and compares. Who may control is the server's call (/api/me,
+ * enforced on every write); anyone who may can step down to Monitor.
+ */
 export default function App() {
+  const [me, setMe] = useState<Me | null>(null)
+  const [chosenMode, setChosenMode] = useState<Mode>(() => {
+    try {
+      return window.localStorage.getItem(MODE_KEY) === "monitor" ? "monitor" : "control"
+    } catch {
+      return "control"
+    }
+  })
+  const mayControl = me?.control ?? false
+  const control = mayControl && chosenMode === "control"
+  useEffect(() => {
+    const ask = () => api.me().then(setMe).catch(() => undefined)
+    ask()
+    const timer = setInterval(ask, ME_INTERVAL)
+    return () => clearInterval(timer)
+  }, [])
+  const chooseMode = (next: Mode) => {
+    setChosenMode(next)
+    try {
+      window.localStorage.setItem(MODE_KEY, next)
+    } catch {
+      /* it just will not be remembered */
+    }
+  }
+
   const [crates, setCrates] = useState<Crate[]>([])
   const [crateId, setCrateId] = useState<string | null>(null)
 
@@ -289,14 +327,14 @@ export default function App() {
       const target = event.target as HTMLElement | null
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA"
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key === "r" || event.key === "R") {
+      if (control && (event.key === "r" || event.key === "R")) {
         event.preventDefault()
         void takeSnapshot()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [takeSnapshot])
+  }, [takeSnapshot, control])
 
   // -- derived ------------------------------------------------------------
 
@@ -336,92 +374,112 @@ export default function App() {
     }
   }, [current, activeColumns, changes, filter])
 
+  const tabs: TabItem[] = crates.map((crate) => ({
+    value: crate.id,
+    label: crate.label,
+    // The open snapshot's counts under its crate's name.
+    ...(crate.id === crateId && totals
+      ? { state: `${totals.powered} on${totals.faults ? ` · ${totals.faults} fault` : ""}`, tone: totals.faults ? ("alarm" as const) : ("ok" as const) }
+      : {}),
+  }))
+
   return (
+    <Screen
+      top={
+        <>
+          {/* Monitoring is stated, not implied by missing buttons. */}
+          <Brand name="HV" readOnly={!control} />
+          <Tabs items={tabs} value={crateId ?? ""} onChange={setCrateId} />
+          <Spacer />
+          {mayControl ? (
+            <Choice
+              small
+              options={[
+                { value: "control", label: "Control" },
+                { value: "monitor", label: "Monitor" },
+              ]}
+              value={control ? "control" : "monitor"}
+              onChange={chooseMode}
+            />
+          ) : null}
+          <ThemeSwitch />
+        </>
+      }
+    >
     <div className="app">
       <div className="bar">
-        <span className="bar-title">HV Monitoring</span>
+        {control ? (
+          <Button
+            variant="default"
+            onClick={() => void takeSnapshot()}
+            loading={busy}
+            disabled={!crateId}
+            leftSection={<Camera size={13} />}
+            title="Read the crate now (R)"
+          >
+            Snapshot
+          </Button>
+        ) : null}
 
-        <Select
-          aria-label="Crate"
-          data={crates.map((crate) => ({ value: crate.id, label: `${crate.label} · ${crate.host}` }))}
-          value={crateId}
-          onChange={setCrateId}
-          allowDeselect={false}
-          disabled={crates.length === 0}
-          comboboxProps={{ width: 280, position: "bottom-start" }}
-          w={210}
-        />
-
-        <Button
-          onClick={() => void takeSnapshot()}
-          loading={busy}
-          disabled={!crateId}
-          leftSection={<Camera size={13} />}
-          title="Read the crate now (R)"
-        >
-          Snapshot
-        </Button>
-
-        {/* Whether this crate's counts appear on the LILAK portal's live wall.
-            Config only: pressing it never reads the crate. */}
-        <Button
-          variant={liveSummary ? "filled" : "default"}
-          color="orange"
-          disabled={!crateId}
-          onClick={toggleLiveSummary}
-          title={
-            liveSummary
-              ? "This crate's on / trip / alarm counts are on the portal's live wall — click to take them off"
-              : "This crate's counts are off the portal's live wall — click to put them back"
-          }
-        >
-          {liveSummary ? "live: on" : "live: off"}
-        </Button>
-
-        {/* How often this crate is archived. Config only, like the button
-            beside it: typing here never reads the crate. */}
-        <Tooltip
-          label={
-            archiveMin > 0
-              ? `A snapshot is kept every ${archiveMin} min, reusing a reading the live wall already took where it can. 0 turns the timer off.`
-              : "Nothing is kept on a timer — only what you snapshot by hand or what elog fills."
-          }
-        >
-          <Group gap={4} wrap="nowrap">
-            <Text size="xs" c="dimmed">
-              archive
-            </Text>
-            <NumberInput
-              size="xs"
-              w={72}
-              min={0}
-              max={1440}
-              step={5}
-              disabled={!crateId}
-              value={archiveMin}
-              onChange={(value) => setArchiveMin(Number(value) || 0)}
-              onBlur={() => saveArchiveMin(archiveMin)}
-              suffix=" min"
-            />
-          </Group>
-        </Tooltip>
-
-        {current ? (
-          <>
-            <span className="tabular">{stampTime(current.taken_at_local)}</span>
-            <span className="meta">{ago(current.taken_at)}</span>
-            <span className="meta">{current.elapsed_ms} ms</span>
-            {totals ? (
-              <span className="meta">
-                {current.boards.length} boards · {totals.channels} ch ·{" "}
-                <b className={totals.powered > 0 ? "on" : "dim"}>{totals.powered} on</b>
-                {totals.faults > 0 ? <b className="fault"> · {totals.faults} fault</b> : null}
-              </span>
-            ) : null}
-          </>
+        {/* Whether this crate's counts appear on the LILAK portal's live wall,
+            and how often it is archived. Config only: neither reads the crate. */}
+        {control ? (
+          <Choice
+            small
+            value={liveSummary ? "on" : "off"}
+            onChange={(v) => {
+              if ((v === "on") !== liveSummary) toggleLiveSummary()
+            }}
+            options={[
+              { value: "on", label: "live wall: on" },
+              { value: "off", label: "off" },
+            ]}
+          />
         ) : (
-          <span className="meta">no snapshot open</span>
+          <Tag full label="LIVE WALL">{liveSummary ? "on" : "off"}</Tag>
         )}
+
+        {control ? (
+          <Tooltip
+            label={
+              archiveMin > 0
+                ? `A snapshot is kept every ${archiveMin} min, reusing a reading the live wall already took where it can. 0 turns the timer off.`
+                : "Nothing is kept on a timer — only what you snapshot by hand or what elog fills."
+            }
+          >
+            <Group gap={6} wrap="nowrap">
+              <Text size="xs" c="dimmed">
+                archive every
+              </Text>
+              <NumberInput
+                w={88}
+                min={0}
+                max={1440}
+                step={1}
+                disabled={!crateId}
+                value={archiveMin}
+                onChange={(value) => setArchiveMin(Number(value) || 0)}
+                onBlur={() => saveArchiveMin(archiveMin)}
+                suffix=" min"
+              />
+            </Group>
+          </Tooltip>
+        ) : (
+          <Tag full label="ARCHIVE">{archiveMin > 0 ? `every ${archiveMin} min` : "off"}</Tag>
+        )}
+
+        {/* Which reading is open: fixed facts (rule 4), held widths (rule 5). */}
+        <Tag full label="TAKEN">
+          <Hold reserve={["8888-88-88 88:88:88", "no snapshot open"]}>
+            {current ? stampTime(current.taken_at_local) : "no snapshot open"}
+          </Hold>
+        </Tag>
+        {current ? (
+          <span className="meta">
+            {ago(current.taken_at)} · {current.elapsed_ms} ms · {current.boards.length} boards ·{" "}
+            {totals?.channels} ch
+          </span>
+        ) : null}
 
         <span className="spacer" />
 
@@ -471,19 +529,16 @@ export default function App() {
 
         <Group gap="md">
           <Checkbox
-            size="xs"
             label="on only"
             checked={filter.poweredOnly}
             onChange={(event) => setFilter({ ...filter, poweredOnly: event.currentTarget.checked })}
           />
           <Checkbox
-            size="xs"
             label="faults only"
             checked={filter.faultsOnly}
             onChange={(event) => setFilter({ ...filter, faultsOnly: event.currentTarget.checked })}
           />
           <Checkbox
-            size="xs"
             label="changed only"
             checked={filter.changedOnly}
             disabled={!baseline}
@@ -510,7 +565,10 @@ export default function App() {
         )}
       </div>
 
-      {error ? <div className="notice">{error}</div> : null}
+      {/* Always there (NEON rule 5): a failure fills it instead of pushing the tables. */}
+      <div className="hv-noticeline">
+        <NoticeLine tone={error ? "alarm" : null}>{error ?? "No errors"}</NoticeLine>
+      </div>
 
       <div className="body">
         <HistoryPanel
@@ -544,7 +602,7 @@ export default function App() {
                   changes={changes}
                   filter={filter}
                   live={liveOnBoard(board.slot)}
-                  onLive={toggleLive}
+                  onLive={control ? toggleLive : undefined}
                 />
               ))}
             </>
@@ -558,5 +616,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </Screen>
   )
 }

@@ -16,7 +16,8 @@
     "@mantine/notifications": "^9.5.2",
     "lucide-react": "^1.35.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
