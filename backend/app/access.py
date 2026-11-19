@@ -2,7 +2,9 @@
 
 One service, two modes. Anyone the portal lets in can watch; only a portal
 manager, or an admin of THIS service (a portal grant with "admin" ticked, given
-to the person or to one of their groups), can take or delete a snapshot, or change the live wall and the archive timer. The check is
+to the person or to one of their groups), can delete a snapshot, or change the live wall and the archive timer.
+Taking a snapshot (reading the crate now) is open to anyone signed in: it only
+reads, and a watcher needs a fresh reading as much as a controller. The check is
 here, on the server, for every request that is not a read -- the page hiding
 its buttons is a convenience, not the gate.
 
@@ -13,6 +15,7 @@ to ask, so everything is allowed -- as it always was.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -66,12 +69,21 @@ def who(request: Request) -> dict:
     """The caller's name and whether they may control. Blocking (it may ask the
     portal and read its database): call it off the event loop."""
     if not UNDER_PORTAL or _identity is None:
-        return {"name": None, "control": True, "standalone": True}
+        return {"name": None, "control": True, "signed_in": True, "standalone": True}
     me = _identity(request, request.headers.get("authorization"))
-    control = bool(me.get("authenticated")) and (is_manager(me) or _service_admin(me.get("email")))
-    return {"name": me.get("name"), "control": control, "standalone": False}
+    signed_in = bool(me.get("authenticated"))
+    control = signed_in and (is_manager(me) or _service_admin(me.get("email")))
+    return {"name": me.get("name"), "control": control, "signed_in": signed_in, "standalone": False}
 
 
 def needs_control(request: Request) -> bool:
     path = request.url.path
     return request.method not in SAFE_METHODS and path.startswith("/api/") and path not in OPEN_PATHS
+
+
+#: Taking a snapshot: POST /api/crates/<id>/snapshot. Monitoring may do it.
+SNAPSHOT = re.compile(r"^/api/crates/[^/]+/snapshot$")
+
+
+def is_snapshot(request: Request) -> bool:
+    return request.method == "POST" and bool(SNAPSHOT.match(request.url.path))

@@ -327,14 +327,14 @@ export default function App() {
       const target = event.target as HTMLElement | null
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA"
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
-      if (control && (event.key === "r" || event.key === "R")) {
+      if (event.key === "r" || event.key === "R") {
         event.preventDefault()
         void takeSnapshot()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [takeSnapshot, control])
+  }, [takeSnapshot])
 
   // -- derived ------------------------------------------------------------
 
@@ -408,7 +408,8 @@ export default function App() {
     >
     <div className="app">
       <div className="bar">
-        {control ? (
+        {/* Anyone may read the crate now (Monitor too); the server checks sign-in. */}
+        {
           <Button
             variant="default"
             onClick={() => void takeSnapshot()}
@@ -419,7 +420,7 @@ export default function App() {
           >
             Snapshot
           </Button>
-        ) : null}
+        }
 
         {/* Whether this crate's counts appear on the LILAK portal's live wall,
             and how often it is archived. Config only: neither reads the crate. */}

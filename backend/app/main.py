@@ -61,10 +61,10 @@ async def control_gate(request: Request, call_next):
     """Monitoring callers may read everything and change nothing (access.py)."""
     if access.needs_control(request):
         caller = await run_in_threadpool(access.who, request)
-        if not caller["control"]:
+        if not (caller["control"] or (access.is_snapshot(request) and caller["signed_in"])):
             return JSONResponse(
                 status_code=403,
-                content={"detail": "Monitoring only: snapshots and the live wall need a portal manager or an admin of this service."},
+                content={"detail": "Monitoring only: deleting snapshots, the live wall and the archive timer need a portal manager or an admin of this service."},
             )
     return await call_next(request)
 

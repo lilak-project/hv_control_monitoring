@@ -42,4 +42,9 @@ assert check("user", {"authorization": "Bearer " + tok("user@x")}) == (False, 40
 assert check("svc admin", {"authorization": "Bearer " + tok("svcadmin@x")}) == (True, 200)
 assert check("group admin", {"authorization": "Bearer " + tok("grp@x")}) == (True, 200)
 assert check("manager", {"authorization": "Bearer " + tok("user@x", "manager")}) == (True, 200)
-print("ok")
+print("gate ok")
+# Taking a snapshot only reads the crate: anyone signed in may (Monitor too), nobody else.
+snap = lambda headers: c.post("/api/crates/none/snapshot", headers=headers).status_code
+assert snap({}) == 403
+assert snap({"authorization": "Bearer " + tok("user@x")}) != 403
+print("snapshot ok")
