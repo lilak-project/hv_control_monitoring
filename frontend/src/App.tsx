@@ -523,7 +523,9 @@ export default function App() {
           placeholder="filter by name or channel"
           value={filter.text}
           onChange={(event) => setFilter({ ...filter, text: event.currentTarget.value })}
-          w={190}
+          // Lit while it filters, so a short list says why (NEON .set).
+          classNames={{ input: filter.text ? "set" : undefined }}
+          w={220}
         />
 
         <ColumnPicker params={params} chosen={activeColumns} onChange={setColumns} />
